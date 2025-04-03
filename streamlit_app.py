@@ -30,8 +30,44 @@ def get_local_ip():
         s.close()
     return IP
 
-# Define available models
-AVAILABLE_MODELS = {
+# Function to fetch available models from the LLM server
+def fetch_available_models(server_url):
+    try:
+        response = requests.get(
+            f"{server_url}/v1/models",
+            timeout=5
+        )
+        
+        if response.status_code == 200:
+            models_data = response.json()
+            # Extract model IDs and create a dictionary
+            models_dict = {}
+            for model in models_data.get('data', []):
+                model_id = model.get('id')
+                if model_id:
+                    # Use the model ID as both key and display name initially
+                    models_dict[model_id] = model_id
+                    
+                    # Try to create a more friendly name from the model ID
+                    friendly_name = model_id.replace('-', ' ').title()
+                    # Apply some common replacements for better display
+                    friendly_name = friendly_name.replace("Instruct", "Instruct")
+                    friendly_name = friendly_name.replace("Chat", "Chat")
+                    friendly_name = friendly_name.replace("Llama", "Llama")
+                    friendly_name = friendly_name.replace("Llm", "LLM")
+                    friendly_name = friendly_name.replace("Gpt", "GPT")
+                    friendly_name = friendly_name.replace("Bert", "BERT")
+                    
+                    models_dict[model_id] = friendly_name
+            
+            return models_dict
+        return {}
+    except Exception as e:
+        st.sidebar.error(f"Error fetching models: {str(e)}")
+        return {}
+
+# Define fallback models in case server doesn't support model listing
+FALLBACK_MODELS = {
     "gemma-3-4b-it": "Gemma 3 4B Instruct",
     "qwen2.5-7b-instruct-1m": "Qwen 2.5 7B Instruct"
 }
@@ -48,14 +84,27 @@ if "file_context" not in st.session_state:
 if "url_context" not in st.session_state:
     st.session_state.url_context = []
 
+if "available_models" not in st.session_state:
+    # Start with an empty dict - will be populated during initialization
+    st.session_state.available_models = {}
+
 if "active_model" not in st.session_state:
-    st.session_state.active_model = list(AVAILABLE_MODELS.keys())[0]
+    st.session_state.active_model = None
 
 if "model_status" not in st.session_state:
     st.session_state.model_status = {}
 
 if "llm_server_url" not in st.session_state:
     st.session_state.llm_server_url = DEFAULT_LLM_SERVER_URL
+    # Fetch models during initial load
+    models = fetch_available_models(DEFAULT_LLM_SERVER_URL)
+    if models:
+        st.session_state.available_models = models
+        st.session_state.active_model = next(iter(models.keys()), None)
+    else:
+        # Use fallback models if fetching fails
+        st.session_state.available_models = FALLBACK_MODELS
+        st.session_state.active_model = next(iter(FALLBACK_MODELS.keys()), None)
 
 # Function to test if a model is available
 def test_model_availability(model_name):
@@ -189,22 +238,54 @@ with st.sidebar:
     if llm_url != st.session_state.llm_server_url:
         st.session_state.llm_server_url = llm_url
         st.session_state.model_status = {}  # Reset model status when URL changes
+        
+        # Fetch available models when URL changes
+        with st.spinner("Discovering available models..."):
+            models = fetch_available_models(llm_url)
+            if models:
+                st.session_state.available_models = models
+                st.session_state.active_model = next(iter(models.keys()), None)
+                st.success(f"Found {len(models)} models")
+            else:
+                # Use fallback models if fetching fails
+                st.session_state.available_models = FALLBACK_MODELS
+                st.session_state.active_model = next(iter(FALLBACK_MODELS.keys()), None)
+                st.warning("Could not discover models, using fallback options")
+        
         st.rerun()  # Refresh to test new URL
     
     st.header("Model Settings")
     
-    # Model selection
-    selected_model = st.selectbox(
-        "Select LLM model",
-        options=list(AVAILABLE_MODELS.keys()),
-        format_func=lambda x: AVAILABLE_MODELS[x],
-        index=list(AVAILABLE_MODELS.keys()).index(st.session_state.active_model)
-    )
+    # Show refresh models button
+    if st.button("Refresh Available Models"):
+        with st.spinner("Discovering available models..."):
+            models = fetch_available_models(st.session_state.llm_server_url)
+            if models:
+                st.session_state.available_models = models
+                # Keep current model if it's still available, otherwise select first available
+                if st.session_state.active_model not in models:
+                    st.session_state.active_model = next(iter(models.keys()), None)
+                st.success(f"Found {len(models)} models")
+            else:
+                st.error("Could not discover models")
+        st.rerun()
     
-    # Check model availability when selection changes
-    if selected_model != st.session_state.active_model:
-        st.session_state.active_model = selected_model
+    # Model selection - now using the dynamically fetched models
+    if st.session_state.available_models:
+        selected_model = st.selectbox(
+            "Select LLM model",
+            options=list(st.session_state.available_models.keys()),
+            format_func=lambda x: st.session_state.available_models[x],
+            index=list(st.session_state.available_models.keys()).index(st.session_state.active_model) 
+                if st.session_state.active_model in st.session_state.available_models else 0
+        )
         
+        # Check model availability when selection changes
+        if selected_model != st.session_state.active_model:
+            st.session_state.active_model = selected_model
+    else:
+        st.warning("No models available. Check LLM server connection.")
+    
     # Model info display
     model_info_container = st.container()
     
@@ -407,24 +488,34 @@ update_system_message()
 # Display current model status at the top of the sidebar
 with model_info_container:
     # Check model availability
-    for model_name in AVAILABLE_MODELS.keys():
-        # Only test models that haven't been tested yet or the currently selected model
-        if model_name not in st.session_state.model_status or model_name == selected_model:
-            is_available = test_model_availability(model_name)
-            st.session_state.model_status[model_name] = is_available
+    if st.session_state.active_model:
+        # Only test the currently selected model
+        is_available = test_model_availability(st.session_state.active_model)
+        st.session_state.model_status[st.session_state.active_model] = is_available
 
-    # Show current model status
-    if st.session_state.model_status.get(selected_model, False):
-        st.success(f"Using {AVAILABLE_MODELS[selected_model]}")
-    else:
-        # Try to find any available model
-        available_models = [m for m, status in st.session_state.model_status.items() if status]
-        if available_models:
-            fallback_model = available_models[0]
-            st.warning(f"{AVAILABLE_MODELS[selected_model]} not available, falling back to {AVAILABLE_MODELS[fallback_model]}")
-            st.session_state.active_model = fallback_model
+        # Show current model status
+        if is_available:
+            model_name = st.session_state.available_models.get(st.session_state.active_model, st.session_state.active_model)
+            st.success(f"Using {model_name}")
         else:
-            st.error("No LLM models available! Make sure your local LLM server is running.")
+            # Try to find any available model
+            available_models = []
+            with st.spinner("Testing available models..."):
+                for model in list(st.session_state.available_models.keys())[:3]:  # Test only first 3 models
+                    if test_model_availability(model):
+                        available_models.append(model)
+                        break
+            
+            if available_models:
+                fallback_model = available_models[0]
+                model_name = st.session_state.available_models.get(st.session_state.active_model, st.session_state.active_model)
+                fallback_name = st.session_state.available_models.get(fallback_model, fallback_model)
+                st.warning(f"{model_name} not available, falling back to {fallback_name}")
+                st.session_state.active_model = fallback_model
+            else:
+                st.error("No LLM models available! Make sure your local LLM server is running.")
+    else:
+        st.error("No model selected. Check LLM server connection.")
 
 # Display chat messages
 for message in st.session_state.messages:
@@ -516,7 +607,7 @@ def send_to_llm(messages, model_name):
         st.session_state.model_status[model_name] = False
     
     # Try all other models
-    for alt_model in AVAILABLE_MODELS.keys():
+    for alt_model in st.session_state.available_models.keys():
         if alt_model != model_name:
             try:
                 response = requests.post(
@@ -590,7 +681,7 @@ if prompt := st.chat_input("Type your message here..."):
             # If a different model was used, update the active model
             if used_model != model_to_use:
                 st.session_state.active_model = used_model
-                message_placeholder.markdown(f"*Using {AVAILABLE_MODELS[used_model]} instead of {AVAILABLE_MODELS[model_to_use]}*\n\n")
+                message_placeholder.markdown(f"*Using {st.session_state.available_models[used_model]} instead of {st.session_state.available_models[model_to_use]}*\n\n")
             
             bot_message = data["choices"][0]["message"]["content"]
             message_placeholder.markdown(bot_message)
@@ -605,4 +696,10 @@ st.sidebar.markdown("### How to run this app")
 st.sidebar.code("streamlit run streamlit_app.py")
 st.sidebar.markdown("### LLM Server Info")
 st.sidebar.markdown(f"The app expects your LLM server to be running at `{st.session_state.llm_server_url}`")
-st.sidebar.markdown("Supported models: " + ", ".join([f"`{k}`" for k in AVAILABLE_MODELS.keys()]))
+
+# Display available models dynamically instead of hardcoded
+if st.session_state.available_models:
+    model_list = ", ".join([f"`{k}`" for k in st.session_state.available_models.keys()])
+    st.sidebar.markdown(f"Available models: {model_list}")
+else:
+    st.sidebar.markdown("No models discovered. Check server connection.")
