@@ -1,10 +1,17 @@
+import argparse
 from pyngrok import ngrok
 
-# Set your authtoken (from dashboard)
-ngrok.set_auth_token("")  # Replace with your actual token
+# Set up argument parsing
+parser = argparse.ArgumentParser(description='Start ngrok tunnel to local server')
+parser.add_argument('--token', required=True, help='Your ngrok authentication token')
+parser.add_argument('--port', type=int, default=1234, help='Local port to expose (default: 1234)')
+args = parser.parse_args()
 
-# Connect to your local server running on port 1234
-public_url = ngrok.connect(1234, "http")
+# Set auth token from command-line argument
+ngrok.set_auth_token(args.token)
+
+# Connect to your local server running on specified port
+public_url = ngrok.connect(args.port, "http")
 print(f"Public URL: {public_url}")
 
 # Keep the script running to maintain the tunnel
