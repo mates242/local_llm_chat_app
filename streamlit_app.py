@@ -476,10 +476,6 @@ if prompt := st.chat_input("Type your message here..."):
 
 # Display a note about how to run the app
 st.sidebar.divider()
-st.sidebar.markdown("### How to run this app")
-st.sidebar.code("streamlit run streamlit_app.py")
-st.sidebar.markdown("### LLM Server Info")
-st.sidebar.markdown(f"The app expects your LLM server to be running at `{st.session_state.llm_server_url}`")
 
 # Display available models dynamically instead of hardcoded
 if st.session_state.available_models:
