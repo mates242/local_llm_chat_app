@@ -119,6 +119,9 @@ if "ngrok_url" not in st.session_state:
 if "ngrok_tunnel_active" not in st.session_state:
     st.session_state.ngrok_tunnel_active = False
 
+if "ngrok_ip" not in st.session_state:
+    st.session_state.ngrok_ip = "127.0.0.1"
+
 if "ngrok_port" not in st.session_state:
     st.session_state.ngrok_port = 1234
 
@@ -128,7 +131,7 @@ def extract_port_from_url(url):
     return parsed_url.port or (443 if parsed_url.scheme == 'https' else 80)
 
 # Function to start ngrok tunnel
-def start_ngrok_tunnel(token, port):
+def start_ngrok_tunnel(token, ip="127.0.0.1", port=1234):
     if not NGROK_AVAILABLE:
         return None
     
@@ -138,6 +141,8 @@ def start_ngrok_tunnel(token, port):
             remote_access.stop_tunnel(st.session_state.ngrok_url)
         
         # Start new tunnel
+        # Construct URL from IP and port
+        target_url = f"http://{ip}:{port}"
         public_url = remote_access.start_tunnel(token, port)
         st.session_state.ngrok_tunnel_active = True
         st.session_state.ngrok_url = public_url
@@ -275,17 +280,19 @@ with st.sidebar:
     if NGROK_AVAILABLE:
         st.subheader("Remote Access via Ngrok")
         ngrok_token = st.text_input("Ngrok Auth Token", value=st.session_state.ngrok_token, type="password")
+        ngrok_ip = st.text_input("Local LLM IP", value=st.session_state.ngrok_ip)
         ngrok_port = st.number_input("Local LLM Port", value=st.session_state.ngrok_port, min_value=1, max_value=65535)
         
         # Update token if changed
-        if ngrok_token != st.session_state.ngrok_token or ngrok_port != st.session_state.ngrok_port:
+        if ngrok_token != st.session_state.ngrok_token or ngrok_ip != st.session_state.ngrok_ip or ngrok_port != st.session_state.ngrok_port:
             st.session_state.ngrok_token = ngrok_token
+            st.session_state.ngrok_ip = ngrok_ip
             st.session_state.ngrok_port = ngrok_port
             
             # Start tunnel if token provided
             if ngrok_token:
                 with st.spinner("Starting ngrok tunnel..."):
-                    public_url = start_ngrok_tunnel(ngrok_token, ngrok_port)
+                    public_url = start_ngrok_tunnel(ngrok_token, ngrok_ip, ngrok_port)
                     if public_url:
                         st.success(f"Tunnel created! Public URL: {public_url}")
                         # Update LLM server URL with the ngrok URL
@@ -525,7 +532,7 @@ with st.sidebar:
                 st.success(f"Loaded {file_stats['processed']} files from {len(file_stats['folders_processed'])} subfolders ({round(file_stats['total_chars']/1000)}KB) in {processing_time:.2f}s")
                 
                 if file_stats["skipped_large"] > 0 or file_stats["skipped_ext"] > 0:
-                    st.info(f"Skipped {file_stats['skipped_large']} files exceeding size limit and {file_stats['skipped_ext']} files with non-selected extensions")
+                    st.info(f"Skipped {file_stats["skipped_large"]} files exceeding size limit and {file_stats["skipped_ext"]} files with non-selected extensions")
                 
                 # Update system message with context
                 update_system_message()
