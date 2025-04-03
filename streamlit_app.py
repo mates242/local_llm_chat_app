@@ -78,9 +78,6 @@ if "messages" not in st.session_state:
         {"role": "system", "content": "You are a helpful assistant."}
     ]
 
-if "file_context" not in st.session_state:
-    st.session_state.file_context = []
-
 if "url_context" not in st.session_state:
     st.session_state.url_context = []
 
@@ -177,48 +174,14 @@ def scrape_url_content(url):
 def update_system_message():
     system_message = "You are a helpful assistant. "
     
-    # Add file context information
-    if st.session_state.file_context:
-        file_context = st.session_state.file_context
-        system_message += f"You have access to the following {len(file_context)} files for context:\n"
-        
-        # Get folders for display
-        folders = set()
-        for file in file_context:
-            folder = os.path.dirname(file['filename'])
-            if folder:
-                folders.add(folder)
-        
-        # Add folder information
-        if folders:
-            folders = sorted(list(folders))
-            system_message += "Subdirectories included: " + ", ".join(folders[:5])
-            if len(folders) > 5:
-                system_message += f" and {len(folders) - 5} more"
-            system_message += "\n\n"
-        
-        # Add file listing
-        system_message += "Files available (sorted by path):\n"
-        for i, file in enumerate(file_context):
-            if i < 20:  # Only list first 20 files to avoid message size issues
-                system_message += f"- {file['filename']} ({file['size']} bytes)\n"
-            else:
-                remaining = len(file_context) - 20
-                system_message += f"... and {remaining} more files\n"
-                break
-    
     # Add URL context information
     if st.session_state.url_context:
-        if st.session_state.file_context:
-            system_message += "\n"
-        
         url_context = st.session_state.url_context
-        system_message += f"You also have access to content from {len(url_context)} web pages:\n"
+        system_message += f"You have access to content from {len(url_context)} web pages:\n"
         
         for i, url_data in enumerate(url_context):
-            system_message += f"- [{url_data['title']}]({url_data['url']})\n"
-    
-    if st.session_state.file_context or st.session_state.url_context:
+            system_message += f"- [{url_data['title']}({url_data['url']})]\n"
+        
         system_message += "\nUse these resources to answer questions. You can ask for specific content if needed."
     
     # Update the system message
@@ -326,153 +289,6 @@ with st.sidebar:
                 st.markdown(f"**{i+1}. [{url_data['title']}]({url_data['url']})**  \n"
                            f"Size: {url_data['size']} characters")
     
-    # Local Folder Section
-    st.subheader("File Context")
-    folder_path = st.text_input("Enter local folder path for context (includes all subfolders):")
-    
-    # Add file filtering options
-    with st.expander("File Filtering Options"):
-        col1, col2 = st.columns(2)
-        with col1:
-            max_files = st.number_input("Max files to load", min_value=1, value=100)
-        with col2:
-            max_file_size_kb = st.number_input("Max file size (KB)", min_value=1, value=1000) 
-        
-        # File extension selection
-        default_extensions = ['.sql']
-        selected_extensions = st.multiselect(
-            "Select file extensions to include",
-            options=['.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.csv', '.ts', '.jsx', '.log', 
-                    '.yaml', '.yml', '.ini', '.cfg', '.conf', '.sh', '.bat', '.ps1', '.sql'],
-            default=default_extensions
-        )
-    
-    # Process local files button
-    if st.button("Load Files", type="primary", key="load_files"):
-        if not folder_path or not os.path.isdir(folder_path):
-            st.error(f"'{folder_path}' is not a valid directory")
-        else:
-            with st.spinner("Loading files including all subfolders..."):
-                # Track stats for progress display
-                file_stats = {
-                    "processed": 0,
-                    "total_chars": 0,
-                    "skipped_large": 0,
-                    "skipped_ext": 0,
-                    "max_chars": 300000,  # 300KB total text limit
-                    "folders_processed": set(),
-                    "start_time": time.time()
-                }
-                
-                # Progress bar
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                # Process files using recursive folder traversal
-                context = []
-                for root, dirs, files in os.walk(folder_path):
-                    # Track folder processing
-                    relative_path = os.path.relpath(root, folder_path)
-                    if relative_path != ".":
-                        file_stats["folders_processed"].add(relative_path)
-                    
-                    # Update progress message
-                    status_text.text(f"Scanning {relative_path}...")
-                    
-                    # Process each file in this directory
-                    for file in files:
-                        # Check if we've reached the file limit
-                        if len(context) >= max_files:
-                            break
-                            
-                        # Check if this file has an allowed extension
-                        if not any(file.lower().endswith(ext) for ext in selected_extensions):
-                            file_stats["skipped_ext"] += 1
-                            continue
-                            
-                        file_path = os.path.join(root, file)
-                        
-                        # Get file size and skip if too large
-                        try:
-                            file_size_kb = os.path.getsize(file_path) / 1024
-                            if file_size_kb > max_file_size_kb:
-                                file_stats["skipped_large"] += 1
-                                continue
-                        except:
-                            continue
-                        
-                        # Try to read the file content
-                        try:
-                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                                content = f.read()
-                                
-                                # Skip empty files
-                                if not content.strip():
-                                    continue
-                                
-                                # Create relative path for display
-                                rel_path = os.path.relpath(file_path, folder_path)
-                                
-                                # Add to context
-                                context.append({
-                                    'filename': rel_path, 
-                                    'content': content,
-                                    'size': len(content)
-                                })
-                                
-                                # Update stats
-                                file_stats["processed"] += 1
-                                file_stats["total_chars"] += len(content)
-                                
-                                # Update progress
-                                progress_percentage = min(file_stats["total_chars"] / file_stats["max_chars"], 0.99)
-                                progress_bar.progress(progress_percentage)
-                                status_text.text(f"Loaded {file_stats['processed']} files from {len(file_stats['folders_processed'])} folders...")
-                                
-                                # Check if we've reached the character limit
-                                if file_stats["total_chars"] >= file_stats["max_chars"]:
-                                    status_text.text("Reached maximum context size limit")
-                                    break
-                                    
-                        except Exception as e:
-                            continue
-                    
-                    # Check if we need to break the folder traversal
-                    if file_stats["total_chars"] >= file_stats["max_chars"] or len(context) >= max_files:
-                        break
-                
-                # Clear progress indicators
-                progress_bar.empty()
-                status_text.empty()
-                
-                # Sort by folder/file for better organization
-                context.sort(key=lambda x: x['filename'])
-                
-                # Store in session state
-                st.session_state.file_context = context
-                
-                # Calculate processing time
-                processing_time = time.time() - file_stats["start_time"]
-                
-                # Show results
-                st.success(f"Loaded {file_stats['processed']} files from {len(file_stats['folders_processed'])} subfolders ({round(file_stats['total_chars']/1000)}KB) in {processing_time:.2f}s")
-                
-                if file_stats["skipped_large"] > 0 or file_stats["skipped_ext"] > 0:
-                    st.info(f"Skipped {file_stats['skipped_large']} files exceeding size limit and {file_stats['skipped_ext']} files with non-selected extensions")
-                
-                # Update system message with context
-                update_system_message()
-                
-                # Show some examples of loaded files
-                with st.expander("View loaded files"):
-                    for i, file in enumerate(context[:10]):  # Show first 10 files
-                        st.markdown(f"**{file['filename']}** ({len(file['content'])} chars)")
-                        code_type = file['filename'].split('.')[-1] if '.' in file['filename'] else 'text'
-                        st.code(file['content'][:500] + "..." if len(file['content']) > 500 else file['content'], language=code_type)
-                    
-                    if len(context) > 10:
-                        st.write(f"... and {len(context) - 10} more files")
-
     st.header("Connection Info")
     local_ip = get_local_ip()
     st.write(f"Your local IP: {local_ip}")
@@ -522,33 +338,6 @@ for message in st.session_state.messages:
     if message["role"] != "system":  # Don't show system message
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-
-# Function to find relevant files in context
-def find_relevant_files(query):
-    if not st.session_state.file_context:
-        return []
-    
-    query = query.lower()
-    keywords = [word for word in query.split() if len(word) > 3]
-    keywords = [word.strip(".,?!;:'\"\(\){}[]") for word in keywords]
-    
-    scored_files = []
-    for file in st.session_state.file_context:
-        score = 0
-        filename = file["filename"].lower()
-        content = file["content"].lower()
-        
-        for keyword in keywords:
-            if keyword in filename:
-                score += 5
-            if keyword in content:
-                score += 1
-        
-        if score > 0:
-            scored_files.append({"file": file, "score": score})
-    
-    scored_files.sort(key=lambda x: x["score"], reverse=True)
-    return [item["file"] for item in scored_files[:3]]
 
 # Function to find relevant URLs in context
 def find_relevant_urls(query):
@@ -644,17 +433,12 @@ if prompt := st.chat_input("Type your message here..."):
         st.markdown(prompt)
     
     # Find relevant context
-    relevant_files = find_relevant_files(prompt)
     relevant_urls = find_relevant_urls(prompt)
     context_message = None
     
-    # Build context content from both files and URLs
-    if relevant_files or relevant_urls:
+    # Build context content from URLs
+    if relevant_urls:
         context_content = "Here is content that may help answer the question:\n\n"
-        
-        # Add file content
-        for file in relevant_files:
-            context_content += f"--- File: {file['filename']} ---\n{file['content']}\n\n"
         
         # Add URL content
         for url_data in relevant_urls:
