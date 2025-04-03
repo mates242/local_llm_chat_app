@@ -8,6 +8,9 @@ import re
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 
+# Default LLM server URL
+DEFAULT_LLM_SERVER_URL = "http://192.168.68.110:1234"
+
 # Configure page
 st.set_page_config(
     page_title="Chat with Local LLM",
@@ -51,11 +54,14 @@ if "active_model" not in st.session_state:
 if "model_status" not in st.session_state:
     st.session_state.model_status = {}
 
+if "llm_server_url" not in st.session_state:
+    st.session_state.llm_server_url = DEFAULT_LLM_SERVER_URL
+
 # Function to test if a model is available
 def test_model_availability(model_name):
     try:
         response = requests.post(
-            "http://localhost:1234/v1/chat/completions",
+            f"{st.session_state.llm_server_url}/v1/chat/completions",
             json={
                 "model": model_name,
                 "messages": [{"role": "user", "content": "test"}],
@@ -174,6 +180,17 @@ st.title("Chat with Local LLM")
 
 # Context folder input in the sidebar
 with st.sidebar:
+    st.header("LLM Server Settings")
+    
+    # LLM Server URL input
+    llm_url = st.text_input("LLM Server URL", value=st.session_state.llm_server_url)
+    
+    # Update URL if changed
+    if llm_url != st.session_state.llm_server_url:
+        st.session_state.llm_server_url = llm_url
+        st.session_state.model_status = {}  # Reset model status when URL changes
+        st.rerun()  # Refresh to test new URL
+    
     st.header("Model Settings")
     
     # Model selection
@@ -477,7 +494,7 @@ def send_to_llm(messages, model_name):
     # Try the requested model first
     try:
         response = requests.post(
-            "http://localhost:1234/v1/chat/completions",
+            f"{st.session_state.llm_server_url}/v1/chat/completions",
             json={
                 "model": model_name,
                 "messages": messages,
@@ -503,7 +520,7 @@ def send_to_llm(messages, model_name):
         if alt_model != model_name:
             try:
                 response = requests.post(
-                    "http://localhost:1234/v1/chat/completions",
+                    f"{st.session_state.llm_server_url}/v1/chat/completions",
                     json={
                         "model": alt_model,
                         "messages": messages,
@@ -580,12 +597,12 @@ if prompt := st.chat_input("Type your message here..."):
             st.session_state.messages.append({"role": "assistant", "content": bot_message})
                 
         except Exception as e:
-            message_placeholder.markdown(f"Error connecting to the LLM: {str(e)}\n\nMake sure your LLM server is running at http://localhost:1234")
+            message_placeholder.markdown(f"Error connecting to the LLM: {str(e)}\n\nMake sure your LLM server is running at {st.session_state.llm_server_url}")
 
 # Display a note about how to run the app
 st.sidebar.divider()
 st.sidebar.markdown("### How to run this app")
 st.sidebar.code("streamlit run streamlit_app.py")
 st.sidebar.markdown("### LLM Server Info")
-st.sidebar.markdown("The app expects your LLM server to be running at `http://localhost:1234`")
+st.sidebar.markdown(f"The app expects your LLM server to be running at `{st.session_state.llm_server_url}`")
 st.sidebar.markdown("Supported models: " + ", ".join([f"`{k}`" for k in AVAILABLE_MODELS.keys()]))
