@@ -7,6 +7,15 @@ import json
 import re
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
+import importlib.util
+import threading
+
+# Check if remote_access module is available and import it
+try:
+    import remote_access
+    NGROK_AVAILABLE = True
+except ImportError:
+    NGROK_AVAILABLE = False
 
 # Default LLM server URL
 DEFAULT_LLM_SERVER_URL = "http://192.168.68.110:1234"
@@ -30,11 +39,51 @@ def get_local_ip():
         s.close()
     return IP
 
-# Define available models
-AVAILABLE_MODELS = {
+# Define fallback models in case API doesn't return any
+FALLBACK_MODELS = {
     "gemma-3-4b-it": "Gemma 3 4B Instruct",
     "qwen2.5-7b-instruct-1m": "Qwen 2.5 7B Instruct"
 }
+
+# Function to fetch available models from the LLM server
+def fetch_available_models(server_url):
+    models = {}
+    try:
+        # Try the /v1/models endpoint (standard OpenAI API)
+        response = requests.get(f"{server_url}/v1/models", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if "data" in data and isinstance(data["data"], list):
+                for model in data["data"]:
+                    if "id" in model:
+                        # Use the model ID as both key and display name
+                        model_id = model["id"]
+                        models[model_id] = model.get("name", model_id)
+                return models
+            
+        # If that didn't work, try a completion request with invalid model to get error
+        # Some servers return available models in the error message
+        response = requests.post(
+            f"{server_url}/v1/completions",
+            json={"model": "invalid_model_name", "prompt": "test"},
+            timeout=3
+        )
+        error_data = response.json()
+        if "error" in error_data and "available models" in str(error_data["error"]).lower():
+            error_msg = str(error_data["error"])
+            # Try to extract model names from error message
+            # This is a heuristic approach and might need adjustment
+            model_names = re.findall(r"['\"]([\w\-\d\.]+)['\"]", error_msg)
+            if model_names:
+                for model_id in model_names:
+                    models[model_id] = model_id
+                return models
+        
+        # If we still don't have models, fall back to default list
+        return FALLBACK_MODELS
+    except Exception as e:
+        print(f"Error fetching models: {str(e)}")
+        return FALLBACK_MODELS
 
 # Initialize session state
 if "messages" not in st.session_state:
@@ -49,13 +98,53 @@ if "url_context" not in st.session_state:
     st.session_state.url_context = []
 
 if "active_model" not in st.session_state:
-    st.session_state.active_model = list(AVAILABLE_MODELS.keys())[0]
+    st.session_state.active_model = None
 
 if "model_status" not in st.session_state:
     st.session_state.model_status = {}
 
 if "llm_server_url" not in st.session_state:
     st.session_state.llm_server_url = DEFAULT_LLM_SERVER_URL
+
+if "available_models" not in st.session_state:
+    st.session_state.available_models = {}
+
+# Ngrok session states
+if "ngrok_token" not in st.session_state:
+    st.session_state.ngrok_token = ""
+
+if "ngrok_url" not in st.session_state:
+    st.session_state.ngrok_url = None
+
+if "ngrok_tunnel_active" not in st.session_state:
+    st.session_state.ngrok_tunnel_active = False
+
+if "ngrok_port" not in st.session_state:
+    st.session_state.ngrok_port = 1234
+
+# Function to extract port from URL
+def extract_port_from_url(url):
+    parsed_url = urlparse(url)
+    return parsed_url.port or (443 if parsed_url.scheme == 'https' else 80)
+
+# Function to start ngrok tunnel
+def start_ngrok_tunnel(token, port):
+    if not NGROK_AVAILABLE:
+        return None
+    
+    try:
+        # Stop existing tunnel if active
+        if st.session_state.ngrok_tunnel_active and st.session_state.ngrok_url:
+            remote_access.stop_tunnel(st.session_state.ngrok_url)
+        
+        # Start new tunnel
+        public_url = remote_access.start_tunnel(token, port)
+        st.session_state.ngrok_tunnel_active = True
+        st.session_state.ngrok_url = public_url
+        return public_url
+    except Exception as e:
+        print(f"Error starting ngrok tunnel: {str(e)}")
+        return None
 
 # Function to test if a model is available
 def test_model_availability(model_name):
@@ -182,28 +271,87 @@ st.title("Chat with Local LLM")
 with st.sidebar:
     st.header("LLM Server Settings")
     
+    # Ngrok Settings Section
+    if NGROK_AVAILABLE:
+        st.subheader("Remote Access via Ngrok")
+        ngrok_token = st.text_input("Ngrok Auth Token", value=st.session_state.ngrok_token, type="password")
+        ngrok_port = st.number_input("Local LLM Port", value=st.session_state.ngrok_port, min_value=1, max_value=65535)
+        
+        # Update token if changed
+        if ngrok_token != st.session_state.ngrok_token or ngrok_port != st.session_state.ngrok_port:
+            st.session_state.ngrok_token = ngrok_token
+            st.session_state.ngrok_port = ngrok_port
+            
+            # Start tunnel if token provided
+            if ngrok_token:
+                with st.spinner("Starting ngrok tunnel..."):
+                    public_url = start_ngrok_tunnel(ngrok_token, ngrok_port)
+                    if public_url:
+                        st.success(f"Tunnel created! Public URL: {public_url}")
+                        # Update LLM server URL with the ngrok URL
+                        st.session_state.llm_server_url = public_url
+                        # Fetch models from the new URL
+                        st.session_state.available_models = fetch_available_models(public_url)
+                    else:
+                        st.error("Failed to start ngrok tunnel")
+
+        # Show current tunnel status
+        if st.session_state.ngrok_tunnel_active and st.session_state.ngrok_url:
+            st.info(f"Active ngrok tunnel: {st.session_state.ngrok_url}")
+            if st.button("Stop Tunnel"):
+                try:
+                    remote_access.stop_tunnel(st.session_state.ngrok_url)
+                    st.session_state.ngrok_tunnel_active = False
+                    st.session_state.ngrok_url = None
+                    st.success("Tunnel stopped")
+                except:
+                    st.error("Failed to stop tunnel")
+    else:
+        st.info("To enable remote access, make sure pyngrok is installed: pip install pyngrok")
+    
     # LLM Server URL input
     llm_url = st.text_input("LLM Server URL", value=st.session_state.llm_server_url)
     
     # Update URL if changed
     if llm_url != st.session_state.llm_server_url:
         st.session_state.llm_server_url = llm_url
-        st.session_state.model_status = {}  # Reset model status when URL changes
+        # Fetch models when URL changes
+        with st.spinner("Detecting available models..."):
+            st.session_state.available_models = fetch_available_models(llm_url)
+        st.session_state.model_status = {}  # Reset model status
         st.rerun()  # Refresh to test new URL
     
     st.header("Model Settings")
     
-    # Model selection
-    selected_model = st.selectbox(
-        "Select LLM model",
-        options=list(AVAILABLE_MODELS.keys()),
-        format_func=lambda x: AVAILABLE_MODELS[x],
-        index=list(AVAILABLE_MODELS.keys()).index(st.session_state.active_model)
-    )
+    # Fetch models if not already done
+    if not st.session_state.available_models:
+        with st.spinner("Detecting available models..."):
+            st.session_state.available_models = fetch_available_models(st.session_state.llm_server_url)
     
-    # Check model availability when selection changes
-    if selected_model != st.session_state.active_model:
-        st.session_state.active_model = selected_model
+    if st.button("Refresh Models"):
+        with st.spinner("Detecting available models..."):
+            st.session_state.available_models = fetch_available_models(st.session_state.llm_server_url)
+    
+    # Model selection
+    model_options = list(st.session_state.available_models.keys())
+    
+    if model_options:
+        # Set default active model if not already set
+        if not st.session_state.active_model or st.session_state.active_model not in model_options:
+            st.session_state.active_model = model_options[0]
+        
+        selected_model = st.selectbox(
+            "Select LLM model",
+            options=model_options,
+            format_func=lambda x: st.session_state.available_models.get(x, x),
+            index=model_options.index(st.session_state.active_model)
+        )
+        
+        # Update active model if changed
+        if selected_model != st.session_state.active_model:
+            st.session_state.active_model = selected_model
+    else:
+        st.error("No models available. Check your LLM server connection.")
         
     # Model info display
     model_info_container = st.container()
@@ -407,24 +555,16 @@ update_system_message()
 # Display current model status at the top of the sidebar
 with model_info_container:
     # Check model availability
-    for model_name in AVAILABLE_MODELS.keys():
-        # Only test models that haven't been tested yet or the currently selected model
-        if model_name not in st.session_state.model_status or model_name == selected_model:
-            is_available = test_model_availability(model_name)
-            st.session_state.model_status[model_name] = is_available
+    if st.session_state.active_model:
+        is_available = test_model_availability(st.session_state.active_model)
+        st.session_state.model_status[st.session_state.active_model] = is_available
 
-    # Show current model status
-    if st.session_state.model_status.get(selected_model, False):
-        st.success(f"Using {AVAILABLE_MODELS[selected_model]}")
-    else:
-        # Try to find any available model
-        available_models = [m for m, status in st.session_state.model_status.items() if status]
-        if available_models:
-            fallback_model = available_models[0]
-            st.warning(f"{AVAILABLE_MODELS[selected_model]} not available, falling back to {AVAILABLE_MODELS[fallback_model]}")
-            st.session_state.active_model = fallback_model
+        # Show current model status
+        if st.session_state.model_status.get(st.session_state.active_model, False):
+            model_name = st.session_state.available_models.get(st.session_state.active_model, st.session_state.active_model)
+            st.success(f"Using {model_name}")
         else:
-            st.error("No LLM models available! Make sure your local LLM server is running.")
+            st.error(f"Selected model not available. Try another model.")
 
 # Display chat messages
 for message in st.session_state.messages:
@@ -605,4 +745,14 @@ st.sidebar.markdown("### How to run this app")
 st.sidebar.code("streamlit run streamlit_app.py")
 st.sidebar.markdown("### LLM Server Info")
 st.sidebar.markdown(f"The app expects your LLM server to be running at `{st.session_state.llm_server_url}`")
-st.sidebar.markdown("Supported models: " + ", ".join([f"`{k}`" for k in AVAILABLE_MODELS.keys()]))
+st.sidebar.markdown("Supported models: " + ", ".join([f"`{k}`" for k in FALLBACK_MODELS.keys()]))
+
+# Display a note about remote access in the sidebar footer
+st.sidebar.divider()
+st.sidebar.markdown("### Remote Access")
+if NGROK_AVAILABLE and st.session_state.ngrok_tunnel_active:
+    st.sidebar.success(f"Your app is accessible remotely at: {st.session_state.ngrok_url}")
+elif NGROK_AVAILABLE:
+    st.sidebar.info("Enter an ngrok token to make your app accessible remotely")
+else:
+    st.sidebar.warning("Install pyngrok to enable remote access")
