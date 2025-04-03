@@ -140,10 +140,8 @@ def start_ngrok_tunnel(token, ip="127.0.0.1", port=1234):
         if st.session_state.ngrok_tunnel_active and st.session_state.ngrok_url:
             remote_access.stop_tunnel(st.session_state.ngrok_url)
         
-        # Start new tunnel
-        # Construct URL from IP and port
-        target_url = f"http://{ip}:{port}"
-        public_url = remote_access.start_tunnel(token, port)
+        # Start new tunnel - pass both IP and port to remote_access module
+        public_url = remote_access.start_tunnel(token, ip, port)
         st.session_state.ngrok_tunnel_active = True
         st.session_state.ngrok_url = public_url
         return public_url
@@ -532,7 +530,7 @@ with st.sidebar:
                 st.success(f"Loaded {file_stats['processed']} files from {len(file_stats['folders_processed'])} subfolders ({round(file_stats['total_chars']/1000)}KB) in {processing_time:.2f}s")
                 
                 if file_stats["skipped_large"] > 0 or file_stats["skipped_ext"] > 0:
-                    st.info(f"Skipped {file_stats["skipped_large"]} files exceeding size limit and {file_stats["skipped_ext"]} files with non-selected extensions")
+                    st.info(f"Skipped {file_stats['skipped_large']} files exceeding size limit and {file_stats['skipped_ext']} files with non-selected extensions")
                 
                 # Update system message with context
                 update_system_message()

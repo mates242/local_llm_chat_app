@@ -1,12 +1,13 @@
 from pyngrok import ngrok
 
-def start_tunnel(token, port=1234):
+def start_tunnel(token, ip="127.0.0.1", port=1234):
     """
     Start an ngrok tunnel to the specified port
     
     Args:
         token (str): The ngrok auth token
-        port (int): The local port to tunnel to
+        ip (str): The local IP address to tunnel to (default: 127.0.0.1)
+        port (int): The local port to tunnel to (default: 1234)
         
     Returns:
         str: The public URL for the tunnel
@@ -14,8 +15,11 @@ def start_tunnel(token, port=1234):
     # Set the auth token
     ngrok.set_auth_token(token)
     
-    # Connect to the local server
-    public_url = ngrok.connect(port, "http")
+    # Construct the target URL with the specified IP and port
+    target_url = f"http://{ip}:{port}"
+    
+    # Connect to the specified server
+    public_url = ngrok.connect(target_url, "http")
     
     return str(public_url)
 
