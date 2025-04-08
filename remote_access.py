@@ -1,26 +1,95 @@
+#!/usr/bin/env python3
+"""
+Ngrok tunnel manager for Chat App Simple
+
+This script creates a secure tunnel using ngrok to expose a local server to the internet.
+It can be used to make your locally running LLM server or Streamlit app accessible remotely.
+"""
 import argparse
-from pyngrok import ngrok
+import sys
+import time
+import signal
+from pyngrok import ngrok, exception
 
-# Set up argument parsing
-parser = argparse.ArgumentParser(description='Start ngrok tunnel to local server')
-parser.add_argument('--token', required=True, help='Your ngrok authentication token')
-parser.add_argument('--port', type=int, default=1234, help='Local port to expose (default: 1234)')
-args = parser.parse_args()
+def setup_tunnel(token, port, name=None):
+    """
+    Set up an ngrok tunnel to the specified local port
+    
+    Args:
+        token (str): Ngrok authentication token
+        port (int): Local port to expose
+        name (str, optional): Name for the tunnel
+    
+    Returns:
+        str: Public URL of the tunnel
+    """
+    try:
+        # Set auth token
+        ngrok.set_auth_token(token)
+        
+        # Connect to local server
+        options = {}
+        if name:
+            options["name"] = name
+            
+        public_url = ngrok.connect(port, "http", options=options)
+        return public_url
+    except exception.PyngrokError as e:
+        print(f"Error setting up ngrok tunnel: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        sys.exit(1)
 
-# Set auth token from command-line argument
-ngrok.set_auth_token(args.token)
+def print_tunnel_info(public_url, port):
+    """Print information about the active tunnel"""
+    print("\n" + "=" * 60)
+    print(f"🌐 PUBLIC URL: {public_url}")
+    print(f"🔌 FORWARDING TO: localhost:{port}")
+    print("=" * 60)
+    print("\n📋 COPY THIS URL to access your application from anywhere!")
+    print("\n⚠️  If using with the chat app, enter this URL in the 'LLM Server URL' field.")
+    print("\n⏱️  Tunnel will remain active until this script is terminated.")
+    print("\n❗ Press Ctrl+C to stop the tunnel")
+    print("=" * 60 + "\n")
 
-# Connect to your local server running on specified port
-public_url = ngrok.connect(args.port, "http")
-print(f"Public URL: {public_url}")
+def signal_handler(sig, frame):
+    """Handle keyboard interrupt and other signals gracefully"""
+    print("\nShutting down tunnel...")
+    ngrok.kill()
+    print("Tunnel closed. Goodbye!")
+    sys.exit(0)
 
-# Keep the script running to maintain the tunnel
-print("Tunnel is active! Press Ctrl+C to terminate.")
-try:
+def main():
+    """Main function to parse arguments and start the tunnel"""
+    parser = argparse.ArgumentParser(
+        description='Create an ngrok tunnel to expose a local server to the internet',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument('--token', required=True, 
+                        help='Your ngrok authentication token (required)')
+    parser.add_argument('--port', type=int, default=1234, 
+                        help='Local port to expose')
+    parser.add_argument('--name', type=str, 
+                        help='Optional name for your tunnel')
+    
+    args = parser.parse_args()
+    
+    # Set up signal handling for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    # Start the tunnel
+    public_url = setup_tunnel(args.token, args.port, args.name)
+    
+    # Display tunnel information
+    print_tunnel_info(public_url, args.port)
+    
     # Keep the process running
-    while True:
-        pass
-except KeyboardInterrupt:
-    # Disconnect the tunnel when script is stopped
-    ngrok.disconnect(public_url)
-    print("Tunnel closed")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        signal_handler(None, None)
+
+if __name__ == "__main__":
+    main()
