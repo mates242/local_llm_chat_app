@@ -454,7 +454,7 @@ with col1:
     st.caption("Connect to your locally running LLM through this interface")
 
 with col2:
-    st.image("https://github.com/charm-tex/streamlit-jupyterchat/raw/master/assets/app-banner.png", width=130)
+    st.image("https://docs.streamlit.io/logo.svg", width=130)
 
 # Sidebar Configuration
 with st.sidebar:
@@ -691,19 +691,13 @@ if prompt := st.chat_input("Type your message here..."):
     # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
     
-    # Display user message
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    
     # Check if we have a server URL and model before proceeding
     if not st.session_state.llm_server_url:
-        with st.chat_message("assistant"):
-            st.error("Please set an LLM server URL in the sidebar before chatting.")
-        # Add error message to chat history
         st.session_state.messages.append({
             "role": "assistant", 
             "content": "⚠️ Please set an LLM server URL in the sidebar before chatting."
         })
+        st.rerun()  # Rerun to display the updated messages in the container
     else:
         # Find relevant context
         relevant_content = find_relevant_content(prompt)
@@ -730,29 +724,28 @@ if prompt := st.chat_input("Type your message here..."):
             api_messages.insert(-1, context_message)
         
         # Call the LLM API with fallback logic
-        with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-            message_placeholder.markdown("Thinking...")
+        try:
+            # Use the selected model with fallback
+            model_to_use = st.session_state.active_model
             
-            try:
-                # Use the selected model with fallback
-                model_to_use = st.session_state.active_model
-                
+            with st.spinner("Thinking..."):
                 data, used_model = send_to_llm(api_messages, model_to_use)
                 
                 # If a different model was used, update the active model
                 if used_model != model_to_use:
                     st.session_state.active_model = used_model
-                    message_placeholder.markdown(f"*Using {st.session_state.available_models[used_model]} instead of {st.session_state.available_models[model_to_use]}*\n\n")
+                    bot_message = f"*Using {st.session_state.available_models[used_model]} instead of {st.session_state.available_models[model_to_use]}*\n\n"
+                    bot_message += data["choices"][0]["message"]["content"]
+                else:
+                    bot_message = data["choices"][0]["message"]["content"]
                 
-                bot_message = data["choices"][0]["message"]["content"]
-                message_placeholder.markdown(bot_message)
                 st.session_state.messages.append({"role": "assistant", "content": bot_message})
-                    
-            except Exception as e:
-                error_msg = f"Error connecting to the LLM: {str(e)}\n\nMake sure your LLM server is running at {st.session_state.llm_server_url}"
-                message_placeholder.markdown(error_msg)
-                st.session_state.messages.append({"role": "assistant", "content": f"⚠️ {error_msg}"})
+                
+        except Exception as e:
+            error_msg = f"Error connecting to the LLM: {str(e)}\n\nMake sure your LLM server is running at {st.session_state.llm_server_url}"
+            st.session_state.messages.append({"role": "assistant", "content": f"⚠️ {error_msg}"})
+            
+        st.rerun()  # Rerun to display the updated messages in the container
 
 # Display a note about models at the bottom of the page
 if st.session_state.available_models:
