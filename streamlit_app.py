@@ -627,14 +627,122 @@ with st.sidebar:
         - Upload various document types as context
         - Auto-detect available models
         
-        [View Documentation](https://github.com/yourusername/chat_app_simple)
+        [View Documentation](https://github.com/mates242/local_llm_chat_app)
         """)
         
         st.divider()
         
-        if st.button("Clear Chat History"):
-            st.session_state.messages = [st.session_state.messages[0]]  # Keep system message
-            st.rerun()
+        st.header("Remote Access Guide")
+        with st.expander("How to access your LLM remotely with ngrok", expanded=True):
+            st.markdown("""
+            ### Access Your LLM From Anywhere Using ngrok
+            
+            This app includes a utility script `remote_access.py` that helps you create a secure tunnel to expose your locally running LLM server to the internet using [ngrok](https://ngrok.com/).
+            
+            #### Prerequisites
+            
+            1. Create a free [ngrok account](https://dashboard.ngrok.com/signup)
+            2. Get your auth token from the [ngrok dashboard](https://dashboard.ngrok.com/get-started/your-authtoken)
+            3. Install the required packages: `pip install pyngrok`
+            
+            #### Using remote_access.py
+            
+            **Basic usage:**
+            ```bash
+            python remote_access.py --token YOUR_NGROK_TOKEN --port PORT_NUMBER
+            ```
+            
+            **Parameters:**
+            - `--token`: Your ngrok authentication token (required)
+            - `--port`: Local port where your LLM server is running (default: 1234)
+            - `--name`: Optional name for your tunnel
+            
+            **Example for LM Studio:**
+            ```bash
+            python remote_access.py --token abc123def456 --port 1234
+            ```
+            
+            **Example for Ollama:**
+            ```bash
+            python remote_access.py --token abc123def456 --port 11434
+            ```
+            
+            #### Step-by-Step Guide
+            
+            1. Start your local LLM server (LM Studio, Ollama, etc.)
+            2. Open a terminal and navigate to the app directory
+            3. Run the remote_access.py script with your ngrok token
+            4. You'll see a public URL displayed (copy this)
+            5. Enter the public URL in the "LLM Server URL" field in the app's Connection tab
+            6. Add `/v1` to the end of the URL (e.g., `https://abcd-123-456.ngrok.io/v1`)
+            7. Click "Refresh Available Models" to connect to your LLM through the tunnel
+            
+            #### Important Notes
+            
+            - Keep the `remote_access.py` script running as long as you need the tunnel
+            - Free ngrok accounts have limitations on connection duration and bandwidth
+            - For security, don't share your public URL with untrusted parties
+            - The tunnel will close when you stop the script (Ctrl+C)
+            """)
+        
+        st.divider()
+        
+        st.header("LM Studio Setup Guide")
+        with st.expander("How to set up LM Studio", expanded=True):
+            st.markdown("""
+            ### Setting Up LM Studio for this App
+            
+            [LM Studio](https://lmstudio.ai/) is a desktop application that allows you to run LLMs locally on your computer. Follow these steps to set it up for use with this chat app:
+            
+            #### 1. Download and Install LM Studio
+            
+            - Visit [lmstudio.ai](https://lmstudio.ai/) and download the version for your operating system
+            - Install LM Studio following the installation instructions
+            - Launch LM Studio after installation
+            
+            #### 2. Download a Model in LM Studio
+            
+            - In the LM Studio sidebar, go to the "Browse" tab
+            - Browse available models or search for one (recommended starter models: Gemma 2B, Phi-2, or Mistral 7B)
+            - Click "Download" next to the model you want to use
+            - Wait for the download to complete (this may take some time depending on model size)
+            
+            #### 3. Set Up the Local Server
+            
+            - In LM Studio, select your downloaded model from the "Local Models" tab
+            - Click the "Chat" button to load the model
+            - At the bottom of the screen, click on "Local Server" to expand the server options
+            - Enable the server by toggling the switch to "On"
+            - Note the server URL (typically http://localhost:1234)
+            - Make sure "OpenAI Compatible" is selected in the dropdown
+            
+            #### 4. Connect This App to LM Studio
+            
+            - In this chat app sidebar, go to the "Connection" tab
+            - Enter the LM Studio server URL (usually `http://localhost:1234/v1`) in the "LLM Server URL" field
+            - Click "Refresh Available Models" to detect your loaded model
+            - Select your model from the dropdown list
+            - You should now be connected and ready to chat!
+            
+            #### 5. Troubleshooting Tips
+            
+            - If models aren't showing up, make sure your model is loaded in LM Studio
+            - Verify the server is running by checking the "On" toggle in LM Studio
+            - Try restarting LM Studio if connection issues persist
+            - For larger models, ensure your computer meets the minimum requirements
+            - The complete URL should include `/v1` at the end (e.g., `http://localhost:1234/v1`)
+            
+            #### 6. Optimizing Performance
+            
+            - In LM Studio settings, you can adjust parameters like context length and generation settings
+            - For faster responses, consider using smaller models (2B-7B parameters)
+            - Adjust the "GPU Layers" setting in LM Studio based on your GPU capabilities
+            - Models with "chat" or "instruct" in the name usually work best for conversation
+            
+            Need more help? Check the [LM Studio documentation](https://lmstudio.ai/docs).
+            """)
+        
+        st.divider()
 
 # Update system message based on current context
 update_system_message()
@@ -675,6 +783,13 @@ if st.session_state.llm_server_url:
         st.error("No model selected. Check server connection.")
 else:
     st.info("👆 Please enter an LLM server URL in the sidebar to get started.")
+
+# Add a clear chat button in a more visible location
+clear_col1, clear_col2 = st.columns([5, 1])
+with clear_col2:
+    if st.button("🗑️ Clear Chat", type="secondary"):
+        st.session_state.messages = [st.session_state.messages[0]]  # Keep system message
+        st.rerun()
 
 # Create a container for displaying chat messages
 chat_container = st.container(height=500)
