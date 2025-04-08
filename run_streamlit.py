@@ -7,9 +7,45 @@ import sys
 import os
 import platform
 import time
+import shutil
+
+def check_system_dependencies():
+    """Check and install system-level dependencies"""
+    system = platform.system()
+    
+    if system == "Darwin":  # macOS
+        # Check for libmagic which is needed by python-magic
+        try:
+            # Check if libmagic is already installed 
+            result = subprocess.run(["brew", "list", "libmagic"], 
+                                   stdout=subprocess.PIPE, 
+                                   stderr=subprocess.PIPE, 
+                                   text=True, 
+                                   check=False)
+            
+            if result.returncode != 0:
+                # Not installed, try to install
+                print("Installing libmagic system library...")
+                if shutil.which("brew"):
+                    subprocess.check_call(["brew", "install", "libmagic"])
+                    print("✓ libmagic installed successfully")
+                else:
+                    print("⚠️ Homebrew not found. Please install libmagic manually:")
+                    print("   1. Install Homebrew from https://brew.sh/")
+                    print("   2. Run: brew install libmagic")
+                    print("   3. Then run this script again")
+                    sys.exit(1)
+        except Exception as e:
+            print(f"⚠️ Error checking for libmagic: {e}")
+            print("Please install libmagic manually:")
+            print("   1. Install Homebrew from https://brew.sh/")
+            print("   2. Run: brew install libmagic")
 
 def check_dependencies():
     """Check and install required dependencies"""
+    
+    # Check system dependencies first
+    check_system_dependencies()
     
     dependencies = [
         "streamlit>=1.22.0",

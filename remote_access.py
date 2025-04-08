@@ -28,11 +28,11 @@ def setup_tunnel(token, port, name=None):
         ngrok.set_auth_token(token)
         
         # Connect to local server
-        options = {}
+        # Pass parameters directly instead of using options dictionary
         if name:
-            options["name"] = name
-            
-        public_url = ngrok.connect(port, "http", options=options)
+            public_url = ngrok.connect(port, "http", name=name)
+        else:
+            public_url = ngrok.connect(port, "http")
         return public_url
     except exception.PyngrokError as e:
         print(f"Error setting up ngrok tunnel: {e}")
