@@ -2,8 +2,6 @@
 
 A straightforward application for chatting with locally running LLMs (Large Language Models), with support for context from documents and web pages.
 
-![Chat App Simple Screenshot](https://github.com/charm-tex/streamlit-jupyterchat/raw/master/assets/app-banner.png)
-
 ## Features
 
 - 🤖 Connect to any OpenAI API-compatible local LLM server
